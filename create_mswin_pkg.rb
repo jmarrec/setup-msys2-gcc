@@ -5,6 +5,7 @@
 # builds in GitHub Actions.
 
 require 'fileutils'
+require 'optparse'
 require_relative 'common'
 
 module CreateMswin
@@ -23,7 +24,12 @@ module CreateMswin
 
     OPENSSL_PKG = 'packages/openssl_x64-windows'
 
-    def copy_ssl_files
+
+    def get_triplet(static)
+      static ? 'x64-windows-static' : 'x64-windows'
+    end
+
+    def copy_ssl_files(static)
       # Locations for vcpkg OpenSSL build
       # X509::DEFAULT_CERT_FILE      C:\vcpkg\packages\openssl_x64-windows/cert.pem
       # X509::DEFAULT_CERT_DIR       C:\vcpkg\packages\openssl_x64-windows/certs
@@ -48,13 +54,13 @@ module CreateMswin
       end
 
       # copy openssl.cnf file
-      conf_path = "#{vcpkg_u}/installed/x64-windows/tools/openssl/openssl.cnf"
+      conf_path = "#{vcpkg_u}/installed/#{get_triplet(static)}/tools/openssl/openssl.cnf"
       if File.readable? conf_path
         IO.copy_stream conf_path, "#{export_ssl_path}/openssl.cnf"
       end
     end
 
-    def generate_package_files
+    def generate_package_files(static)
       ENV['VCPKG_ROOT'] = VCPKG
 
       Dir.chdir VCPKG do |d|
@@ -67,13 +73,13 @@ module CreateMswin
         end
 
         exec_check "Upgrading #{PACKAGES}",
-          "./vcpkg upgrade #{PACKAGES} #{PKG_DEPENDS} --triplet=x64-windows --no-dry-run"
+          "./vcpkg upgrade #{PACKAGES} #{PKG_DEPENDS} --triplet=#{get_triplet(static)} --no-dry-run"
 
         exec_check "Removing outdated packages",
           "./vcpkg remove --outdated"
 
         exec_check "Exporting package files from vcpkg",
-          "./vcpkg export --triplet=x64-windows #{PACKAGES} --raw --output=#{PKG_NAME} --output-dir=#{EXPORT_DIR}"
+          "./vcpkg export --triplet=#{get_triplet(static)} #{PACKAGES} --raw --output=#{PKG_NAME} --output-dir=#{EXPORT_DIR}"
       end
 
       # remove tracked files
@@ -88,22 +94,33 @@ module CreateMswin
       IO.copy_stream "#{vcpkg_u}/#{status_path}", "#{EXPORT_DIR}/#{PKG_NAME}/#{status_path}"
     end
 
-    def run
-      generate_package_files
-      
-      copy_ssl_files
+    def run(static)
+      puts static
+      generate_package_files(static)
+
+      copy_ssl_files(static)
+
+      suffix = static ? '-static' : ''
+      pkg_name = "#{PKG_NAME}#{suffix}"
 
       # create 7z archive file
-      tar_path = "#{__dir__}\\#{PKG_NAME}.7z".gsub '/', '\\'
+      tar_path = "#{__dir__}\\#{pkg_name}.7z".gsub '/', '\\'
 
-      Dir.chdir("#{EXPORT_DIR}/#{PKG_NAME}") do
+      Dir.chdir("#{EXPORT_DIR}/#{pkg_name}") do
         exec_check "Creating 7z file", "\"#{SEVEN}\" a #{tar_path}"
       end
 
       time = Time.now.utc.strftime '%Y-%m-%d %H:%M:%S UTC'
-      upload_7z_update PKG_NAME, time
+      upload_7z_update pkg_name, time
     end
   end
 end
 
-CreateMswin.run
+static = false
+OptionParser.new do |opts|
+  opts.banner = "Usage: create_mswin_pkg.rb [options]"
+
+  opts.on("-s", "--static", "Use static vcpkg libraries") { |v| static = true }
+end.parse!
+
+CreateMswin.run(static)

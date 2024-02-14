@@ -10,13 +10,17 @@ on:
 
 jobs:
   mswin:
-    name: >-
-      mswin vcpkg tools
+    name: "mswin vcpkg tools - ${{ matrix.triplet }}"
     #env:
     #  FORCE_UPDATE: true
     runs-on: windows-2022
     strategy:
       fail-fast: false
+      matrix:
+        triplet: [regular, static]
+        include:
+          - triplet: static
+            rb_args: '-s'
 
     steps:
       - name: Checkout
@@ -39,7 +43,7 @@ jobs:
         timeout-minutes: 15
 
       - name: Update mswin tools 7z and Upload
-        run:  ruby create_mswin_pkg.rb
+        run:  ruby create_mswin_pkg.rb ${{ matrix.rb_args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         timeout-minutes: 30
